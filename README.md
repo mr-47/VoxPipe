@@ -78,12 +78,16 @@ run.cmd
 Two differences are worth knowing before you start. The `whisper-server` binary
 vendored in this repository is a **Linux ELF build and cannot run on Windows**,
 so there is nothing to unpack: supply your own `whisper-server.exe` on `PATH` or
-at `vendor/bin/whisper-server.exe`, and `install.cmd` tells you so. And the
-leftover-server ownership record identifies a process by its start time read
-from `/proc/<pid>/stat`, which does not exist on Windows; the record is still
-written and reaping still works, but it cannot tell a recycled pid from the
-original process, so that one check is weaker there. The Python side needs no
-special handling — every dependency ships Windows wheels.
+at `vendor/bin/whisper-server.exe`, and `install.cmd` tells you so. It has to be
+the **HTTP server**, not the command-line transcriber — searching for "whisper.cpp
+Windows" mostly turns up `main.exe` builds, which cannot work here because
+VoxPipe starts the server and POSTs audio to it. Build it with
+`-DWHISPER_BUILD_SERVER=ON`; the `install.cmd` message has the full commands.
+And the leftover-server ownership record identifies a process by its start time
+read from `/proc/<pid>/stat`, which does not exist on Windows; the record is
+still written and reaping still works, but it cannot tell a recycled pid from
+the original process, so that one check is weaker there. The Python side needs
+no special handling — every dependency in the lock ships a Windows wheel.
 
 ```bash
 cd /path/to/VoxPipe               # this repository

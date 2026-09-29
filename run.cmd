@@ -25,6 +25,14 @@ REM activate.bat sets VIRTUAL_ENV, which is all a child process needs; there
 REM is no PATH rewrite to undo afterwards.
 call ".venv\Scripts\activate.bat"
 
+REM A venv can exist while the install into it failed, and then batch's own
+REM "not recognized" message names nothing actionable. The console script is
+REM looked for by path, not on PATH, so this does not depend on a PATH search.
+if not exist ".venv\Scripts\voxpipe.exe" if not exist ".venv\Scripts\voxpipe.bat" (
+  echo error: voxpipe is not installed in .venv. Re-run install.cmd. 1>&2
+  exit /b 1
+)
+
 echo Watching media-inbox\ ... transcripts land in media-results\
 echo Ctrl-C to stop.
 echo.
