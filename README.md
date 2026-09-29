@@ -50,6 +50,24 @@ Three interfaces, all sharing one warm `whisper-server` process:
 
 ## Installation
 
+Two scripts wrap the steps below for the common case. `install.sh` creates the
+venv, installs the pinned dependencies and downloads the models; `run.sh` then
+starts the folder watcher:
+
+```bash
+./install.sh          # add a model name for something smaller, e.g. small-q5_1
+./run.sh
+```
+
+`install.sh` is safe to re-run — a `.venv` that already works is kept, and
+models already downloaded are left alone. It cannot fetch `whisper-server`
+itself, because a Vulkan build of whisper.cpp is compiled locally rather than
+published as an artifact; the script tells you the four commands to run if the
+binary is missing. `run.sh` takes any `voxpipe watch` flag, so
+`./run.sh --once` drains the inbox and exits, and `./run.sh --no-diarization`
+works as you would expect. Everything below is what those scripts do, written
+out.
+
 ```bash
 cd /path/to/VoxPipe               # this repository
 python3 -m venv .venv
@@ -743,6 +761,8 @@ TRANSCRIBER_TEST_AUDIO=/path/to/some/call.mp3 \
 
 ```
 VoxPipe/                    <- repository root
+├── install.sh             one-command setup: venv + pinned deps + models
+├── run.sh                 start the folder watcher (any voxpipe watch flag)
 ├── media-inbox/        drop audio files here (watch mode)
 ├── media-process/      in transit
 ├── media-failed/       failures + <name>.txt error reports
