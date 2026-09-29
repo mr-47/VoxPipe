@@ -1,0 +1,23 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+dist/
+build/
+.pytest_cache/
+.ruff_cache/
+
+# Audio and transcripts are per-run data: the folders are kept, the contents
+# are not committed.
+media-inbox/*
+media-process/*
+media-failed/*
+media-results/*
+!media-*/.gitkeep
+
+# Vendored binaries and model weights (multi-GB, fetched separately).
+vendor/
+
+# whisper-server logs written by the app.
+*.log
