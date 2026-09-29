@@ -48,6 +48,19 @@ The old app's `format.py` and `merge.py` were adapted (MIT, no copyright holder)
 - **`vendor/` is Git-ignored** (629 MB) but is what makes the project runnable.
   A fresh clone needs `./scripts/vendor-server.sh` and `./scripts/fetch-models.sh`
   first. Never assume `vendor/` is checked in.
+- **The vendored `whisper-server` is a Linux ELF binary, so `install.cmd` is not
+  a full Windows install.** `install.sh`/`install.cmd` cover the venv, the pinned
+  dependencies and the models (all platform-independent, and every dependency
+  ships Windows wheels), but the server has no cross-platform artifact: a
+  Windows user must supply `whisper-server.exe` on `PATH` or at
+  `vendor/bin/whisper-server.exe`. The `.exe` probe in `_discover_server_bin`
+  is needed because `shutil.which` resolves `PATHEXT` but `Path.is_file()` does
+  not — without it a vendored `.exe` is invisible and only the bare-name
+  fallback finds it, which then fails to execute. Two things degrade rather
+  than break there, and should not be "fixed" by pretending they do not:
+  `_pid_alive` and `_process_start_time` read `/proc/<pid>/stat`, which returns
+  `OSError` on Windows, so orphan reaping works but cannot distinguish a
+  recycled pid from the original process.
 - **Never reintroduce `PR_SET_PDEATHSIG` on the server subprocess.** It sounds
   like the obvious fix for an orphaned server, and it is a trap here. The signal
   fires when the **forking thread** dies, not when the process does, and
@@ -101,7 +114,7 @@ python3 -m venv .venv
 .venv/bin/ruff check src tests
 .venv/bin/ruff format src tests
 
-# offline suite: ~3.7s, no GPU, no network  -> 139 passed, 6 skipped
+# offline suite: ~3.6s, no GPU, no network  -> 141 passed, 6 skipped
 .venv/bin/pytest
 
 # e2e: real server + real diarization, needs a binary and a recording

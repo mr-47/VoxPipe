@@ -139,6 +139,44 @@ def test_defaults_are_self_contained(monkeypatch):
     assert server_bin == project / "vendor" / "bin" / "whisper-server"
 
 
+def test_a_vendored_windows_binary_is_found_under_its_exe_name(tmp_path, monkeypatch):
+    """Windows has no extensionless binary, so discovery must probe for .exe.
+
+    ``shutil.which`` resolves PATHEXT, so $PATH needs no help. An in-project
+    binary does: ``Path.is_file()`` does not add an extension, so a
+    ``whisper-server.exe`` dropped into ``vendor/bin/`` was invisible to the
+    file-based candidates and only the bare-name fallback -- which then fails to
+    execute -- could find it.
+    """
+    monkeypatch.setattr("voxpipe.config.shutil.which", lambda _: None)
+    monkeypatch.setattr("voxpipe.config.sys.platform", "win32")
+    vendored = tmp_path / "vendor" / "bin"
+    vendored.mkdir(parents=True)
+    (vendored / "whisper-server.exe").touch()
+
+    found = TranscriberSettings._discover_server_bin(tmp_path)
+
+    assert Path(found) == vendored / "whisper-server.exe"
+
+
+def test_the_extensionless_binary_is_still_preferred_on_posix(tmp_path, monkeypatch):
+    """The .exe probe must not disturb the Linux order of preference.
+
+    Both files present, POSIX platform: the extensionless binary wins, because
+    that is the one this project's own vendor-server.sh produces.
+    """
+    monkeypatch.setattr("voxpipe.config.shutil.which", lambda _: None)
+    monkeypatch.setattr("voxpipe.config.sys.platform", "linux")
+    vendored = tmp_path / "vendor" / "bin"
+    vendored.mkdir(parents=True)
+    (vendored / "whisper-server").touch()
+    (vendored / "whisper-server.exe").touch()
+
+    found = TranscriberSettings._discover_server_bin(tmp_path)
+
+    assert Path(found) == vendored / "whisper-server"
+
+
 def test_speaker_turn_times():
     turn = SpeakerTurn(0.0, 2.0, "SPEAKER_01")
 

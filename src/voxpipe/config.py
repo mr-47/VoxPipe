@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -169,7 +170,7 @@ class TranscriberSettings:
         self.server_state_dir = Path(self.server_state_dir).expanduser()
 
     @staticmethod
-    def _discover_server_bin() -> str:
+    def _discover_server_bin(project: Path | None = None) -> str:
         """Locate the ``whisper-server`` binary.
 
         Checked in order: $PATH, then the binary vendored into the project (plain
@@ -179,20 +180,30 @@ class TranscriberSettings:
 
         No candidate lives outside this project, so the project stays
         relocatable: move it anywhere and the same binary is found.
+
+        ``project`` is injectable only so the search can be tested without
+        creating files next to the real installation.
         """
         name = "whisper-server"
         found = shutil.which(name)
         if found:
             return found
 
-        project = Path(__file__).resolve().parent.parent.parent
-        for candidate in (
-            project / "vendor" / name,
-            project / "vendor" / "bin" / name,  # scripts/vendor-server.sh output
-            project / "build" / "bin" / name,
+        if project is None:
+            project = Path(__file__).resolve().parent.parent.parent
+        # shutil.which resolves the extension through PATHEXT, so $PATH already
+        # finds whisper-server.exe on Windows. Path.is_file() does not, so an
+        # in-project binary has to be probed under its real Windows name too.
+        names = (name, f"{name}.exe") if sys.platform == "win32" else (name,)
+        for directory in (
+            project / "vendor",
+            project / "vendor" / "bin",  # scripts/vendor-server.sh output
+            project / "build" / "bin",
         ):
-            if candidate.is_file():
-                return str(candidate)
+            for candidate_name in names:
+                candidate = directory / candidate_name
+                if candidate.is_file():
+                    return str(candidate)
         return name
 
     # -- model resolution -------------------------------------------------

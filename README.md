@@ -68,6 +68,23 @@ binary is missing. `run.sh` takes any `voxpipe watch` flag, so
 works as you would expect. Everything below is what those scripts do, written
 out.
 
+On Windows use the `.cmd` equivalents, which take the same arguments:
+
+```bat
+install.cmd
+run.cmd
+```
+
+Two differences are worth knowing before you start. The `whisper-server` binary
+vendored in this repository is a **Linux ELF build and cannot run on Windows**,
+so there is nothing to unpack: supply your own `whisper-server.exe` on `PATH` or
+at `vendor/bin/whisper-server.exe`, and `install.cmd` tells you so. And the
+leftover-server ownership record identifies a process by its start time read
+from `/proc/<pid>/stat`, which does not exist on Windows; the record is still
+written and reaping still works, but it cannot tell a recycled pid from the
+original process, so that one check is weaker there. The Python side needs no
+special handling — every dependency ships Windows wheels.
+
 ```bash
 cd /path/to/VoxPipe               # this repository
 python3 -m venv .venv
@@ -739,7 +756,7 @@ purpose: install without `-c`, run the offline suite **and**
 `tests/test_end_to_end.py` (the only tests that touch the real GPU server), then
 regenerate the lock with `pip freeze`.
 
-The default suite is offline and needs no GPU (139 tests, ~3.7 s; 6 more collect
+The default suite is offline and needs no GPU (141 tests, ~3.6 s; 6 more collect
 and skip unless the e2e variables are set) — including the
 API tests, which drive the FastAPI app through `TestClient` with a stub
 transcriber, so they cover routing, the extension gate, error mapping and temp-file
@@ -763,6 +780,8 @@ TRANSCRIBER_TEST_AUDIO=/path/to/some/call.mp3 \
 VoxPipe/                    <- repository root
 ├── install.sh             one-command setup: venv + pinned deps + models
 ├── run.sh                 start the folder watcher (any voxpipe watch flag)
+├── install.cmd            the same, for Windows
+├── run.cmd                the same, for Windows
 ├── media-inbox/        drop audio files here (watch mode)
 ├── media-process/      in transit
 ├── media-failed/       failures + <name>.txt error reports
