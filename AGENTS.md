@@ -48,12 +48,27 @@ The old app's `format.py` and `merge.py` were adapted (MIT, no copyright holder)
 - **`vendor/` is Git-ignored** (629 MB) but is what makes the project runnable.
   A fresh clone needs `./scripts/vendor-server.sh` and `./scripts/fetch-models.sh`
   first. Never assume `vendor/` is checked in.
-- **The vendored `whisper-server` is a Linux ELF binary, so `install.cmd` is not
-  a full Windows install.** `install.sh`/`install.cmd` cover the venv, the pinned
-  dependencies and the models (all platform-independent, and every dependency
-  ships Windows wheels), but the server has no cross-platform artifact: a
-  Windows user must supply `whisper-server.exe` on `PATH` or at
-  `vendor/bin/whisper-server.exe`. The `.exe` probe in `_discover_server_bin`
+- **The vendored `whisper-server` is a Linux ELF binary, so `install.sh` is not
+  a full install.** The scripts cover the venv, the pinned dependencies and the
+  models (all platform-independent, and every dependency ships Windows wheels).
+  The server is the awkward part, and the two platforms differ in *how* it is
+  missing. On Linux, no Vulkan artifact is published at all, so
+  `scripts/vendor-server.sh` only copies a build you made. On Windows upstream
+  *does* publish one, so `install.cmd` offers to fetch
+  `whisper-bin-x64.zip` from the `v1.9.2` release, after asking, and verifies
+  the sha256 before writing anything. Keep three things true about that pin:
+  it names a stable tag (a branch or `master` URL would drift out from under
+  its own hash), the hash is checked before extraction rather than after, and
+  the download and the from-source fallback in `:no-server` pin the same tag —
+  `test_download_and_the_build_fallback_pin_the_same_tag` exists because those
+  are two pieces of text that drift apart silently. Do not relax
+  `if not exist "vendor\bin\whisper-server.exe"` into a bare `if errorlevel`
+  check: PowerShell exits 0 having done nothing under a blocked execution
+  policy or a partial install, and that check is what stops a completed install
+  reporting success with no server. The archive's ten
+  `ggml-cpu-<microarch>.dll` files must all be unpacked — ggml picks between
+  them at load time, so shipping a subset quietly costs performance. The
+  `.exe` probe in `_discover_server_bin`
   is needed because `shutil.which` resolves `PATHEXT` but `Path.is_file()` does
   not — without it a vendored `.exe` is invisible and only the bare-name
   fallback finds it, which then fails to execute. Two things degrade rather
@@ -114,7 +129,7 @@ python3 -m venv .venv
 .venv/bin/ruff check src tests
 .venv/bin/ruff format src tests
 
-# offline suite: ~3.6s, no GPU, no network  -> 141 passed, 6 skipped
+# offline suite: ~5.7s, no GPU, no network  -> 150 passed, 6 skipped
 .venv/bin/pytest
 
 # e2e: real server + real diarization, needs a binary and a recording
@@ -132,6 +147,30 @@ or merge is good. Tier 4 is for watching output shape end to end.
 
 `TRANSCRIBER_TEST_MODEL=small-q5_1` makes the e2e tier considerably faster when
 the default `turbo` model is not what you changed.
+
+## Verifying a Windows change
+
+Wine 9.0 runs the `.cmd` scripts well and finds real batch bugs, but it cannot
+run PowerShell: `wine32` is missing, so every 32-bit EXE is refused, and the
+`powershell.exe` in the prefix is a 128K stub that ignores its arguments and
+always exits 0. Installing the real Windows PowerShell 7 into the prefix does not
+help — it exits 0 silently too. So the split is:
+
+- **The batch logic** — run it under Wine, jumping straight to the stage you
+  changed so the missing Python does not stop the script first. A harness that
+  `goto`s to a label appended at the end of the file works; putting the label
+  inline runs back into the real flow after the first `goto :eof`.
+- **The `.ps1` logic** — run it with the *host* `pwsh`. PowerShell is
+  cross-platform and `Expand-Archive`'s underlying .NET zip APIs are identical,
+  so this exercises the real script, only not the Windows `cmd` handoff into it.
+  `tests/test_install_scripts.py` does exactly that and skips when `pwsh` is
+  absent.
+
+Writing a new `.ps1` and running it is not optional, either. `param([string]$Zip)`
+makes `$Zip` a *type-constrained* variable, and PowerShell names are
+case-insensitive, so a later `$zip = [ZipFile]::OpenRead($Zip)` silently coerces
+the handle back to a string and every entry test fails against an empty
+collection. Name the handle something else.
 
 ## Verifying a diarization or merge change
 

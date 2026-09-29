@@ -75,16 +75,27 @@ install.cmd
 run.cmd
 ```
 
-Two differences are worth knowing before you start. The `whisper-server` binary
+Three differences are worth knowing before you start. The `whisper-server` binary
 vendored in this repository is a **Linux ELF build and cannot run on Windows**,
-so there is nothing to unpack: supply your own `whisper-server.exe` on `PATH` or
-at `vendor/bin/whisper-server.exe`, and `install.cmd` tells you so. It has to be
-the **HTTP server**, not the command-line transcriber — searching for "whisper.cpp
-Windows" mostly turns up `main.exe` builds, which cannot work here because
-VoxPipe starts the server and POSTs audio to it. Build it with
-`-DWHISPER_BUILD_SERVER=ON`; the `install.cmd` message has the full commands.
-And the leftover-server ownership record identifies a process by its start time
-read from `/proc/<pid>/stat`, which does not exist on Windows; the record is
+but unlike the Vulkan case, upstream *does* publish a Windows build, so
+`install.cmd` offers to fetch it: the official `whisper-bin-x64.zip` from the
+`v1.9.2` release, verified against a pinned sha256 before anything is written
+to `vendor/bin/`. That is the one step that puts downloaded code on your
+machine, so it asks first and shows you the URL, hash and size; answering `n`
+skips it and the rest of the install still completes. The `.dll` files are
+unpacked alongside the executable, because ggml loads its backends at run time
+and the server will not start without them. Say `no`, or the archive is
+unavailable, and the script prints the from-source commands instead; note those
+land in `whisper.cpp\build\bin\Release\`, since MSVC is a multi-config
+generator. Whichever route you take, it has to be the **HTTP server**, not the
+command-line transcriber — searching for "whisper.cpp Windows" mostly turns up
+`main.exe` and `whisper-cli.exe` builds, which cannot work here because VoxPipe
+starts the server and POSTs audio to it. The downloadable archive is CPU-only,
+so a Windows install without a GPU-accelerated build will be markedly slower
+than the Linux one; there is no prebuilt x64 Vulkan archive, but upstream does
+publish `whisper-cublas-*-bin-x64.zip` for NVIDIA. And the leftover-server
+ownership record identifies a process by its start time read from
+`/proc/<pid>/stat`, which does not exist on Windows; the record is
 still written and reaping still works, but it cannot tell a recycled pid from
 the original process, so that one check is weaker there. The Python side needs
 no special handling — every dependency in the lock ships a Windows wheel.
@@ -760,7 +771,7 @@ purpose: install without `-c`, run the offline suite **and**
 `tests/test_end_to_end.py` (the only tests that touch the real GPU server), then
 regenerate the lock with `pip freeze`.
 
-The default suite is offline and needs no GPU (141 tests, ~3.6 s; 6 more collect
+The default suite is offline and needs no GPU (150 tests, ~5.7 s; 6 more collect
 and skip unless the e2e variables are set) — including the
 API tests, which drive the FastAPI app through `TestClient` with a stub
 transcriber, so they cover routing, the extension gate, error mapping and temp-file
@@ -784,7 +795,7 @@ TRANSCRIBER_TEST_AUDIO=/path/to/some/call.mp3 \
 VoxPipe/                    <- repository root
 ├── install.sh             one-command setup: venv + pinned deps + models
 ├── run.sh                 start the folder watcher (any voxpipe watch flag)
-├── install.cmd            the same, for Windows
+├── install.cmd            the same, for Windows, + the whisper-server fetch
 ├── run.cmd                the same, for Windows
 ├── media-inbox/        drop audio files here (watch mode)
 ├── media-process/      in transit
@@ -792,6 +803,7 @@ VoxPipe/                    <- repository root
 ├── media-results/      transcripts
 ├── scripts/
 │   ├── fetch-models.sh  VAD + diarization + GGML weights into vendor/models
+│   ├── unpack-server.ps1  verify + unpack the Windows whisper-server archive
 │   └── vendor-server.sh copy a whisper.cpp build into vendor/bin, $ORIGIN RUNPATH
 ├── vendor/              git-ignored; everything needed to run (629 MB)
 │   ├── bin/            relocatable whisper-server + its libraries
@@ -821,6 +833,7 @@ VoxPipe/                    <- repository root
     ├── test_format.py      renderers
     ├── test_merge.py       speaker attribution
     ├── test_config_server.py  model discovery, server flags, orphan takeover
+    ├── test_install_scripts.py  the Windows server pin + unpack script
     └── test_end_to_end.py  real server + real diarization (opt-in)
 ```
 
