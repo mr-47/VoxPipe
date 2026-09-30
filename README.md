@@ -28,6 +28,72 @@ Three interfaces, all sharing one warm `whisper-server` process:
 | Decode | CTranslate2 (no m4a/AAC) | PyAV, so **.m4a works** |
 | Speed (156 s call, GTX 1070) | 14.3 s | 14.7 s (`turbo`), 14.3 s (`small-q5_1`) |
 
+## Platform support
+
+**Linux is the primary target and the one where the GPU path is verified
+end-to-end. Windows is supported, and it can use a GPU too — `install.cmd`
+detects a Vulkan device and fetches a Vulkan build by default, falling back to
+the first-party CPU archive when there is none.** Everything above the ASR layer —
+the CLI, the `media-*` folder workflow, the REST API, diarization, every output
+format and every environment variable — is identical on both. The difference is
+entirely in the `whisper-server` binary, and only because a Linux build of it is
+vendored while no Windows artifact can be.
+
+| | Linux | Windows |
+| --- | --- | --- |
+| Install / run | `./install.sh`, `./run.sh` | `install.cmd`, `run.cmd` |
+| `whisper-server` | **Vendored**, Vulkan build | **Not bundled.** `install.cmd` offers four choices: two third-party Vulkan builds, the first-party CPU archive, or from-source commands |
+| GPU acceleration | **Yes, verified.** Vulkan, so any Vulkan-capable GPU (tested on GTX 1070 / Pascal) | **Available, unverified.** `install.cmd` defaults to a Vulkan build when it detects a device. The two Vulkan archives are third-party and unsigned — see below |
+| Without a GPU | Slower, but `TRANSCRIBER_NO_GPU=1` is honoured | The CPU archive is the default, and `run.cmd` sets `TRANSCRIBER_NO_GPU=1` for a server with no Vulkan backend |
+| Python | ≥ 3.12 (3.12–3.14 install from the lock) | Identical; every pin ships a Windows wheel |
+| Diarization | sherpa-onnx, CPU by design | Identical |
+| API, CLI, folder workflow, output formats | Yes | Yes |
+| Reclaiming a leftover server | pid + `/proc` start time | pid only — `/proc/<pid>/stat` does not exist, so a recycled pid cannot be distinguished |
+| Verification | Full suite plus real GPU end-to-end | Batch logic under Wine, the `.ps1` under host PowerShell. **Not yet run on real Windows** |
+
+Three Windows specifics worth stating plainly, because none of them are obvious:
+
+- **Where a Windows Vulkan build comes from.** `ggml-org` publishes no x64
+  Vulkan archive for Windows, so there is no first-party option.
+  `install.cmd` offers two third-party rebuilds —
+  [`jerryshell/whisper.cpp-windows-vulkan-bin`](https://github.com/jerryshell/whisper.cpp-windows-vulkan-bin)
+  `v1.0.0` and
+  [`DomoticX/whisper.cpp-windows-vulkan`](https://github.com/DomoticX/whisper.cpp-windows-vulkan)
+  `v1.0` — alongside the first-party CPU archive, all three pinned to a tag plus
+  a sha256 that is checked before anything is written. They are unsigned
+  builds from individual accounts, and **neither states which whisper.cpp it was
+  built from.** Their binaries share 43–44 of 45 MSVC lambda symbol ids with
+  upstream `v1.9.2`, which points at the same or a very nearby source tree but is
+  not proof. The hash makes the download verifiable; the publisher is still
+  somebody nobody vouches for. Building your own with `-DGGML_VULKAN=ON` is the
+  alternative, and `run.cmd` recognises that too.
+- **The CPU build is selected for you when there is no Vulkan backend.** VoxPipe
+  picks the GPU with whisper.cpp's Vulkan `-dev 0` flag, which a CPU-only build
+  does not accept — an unrecognized flag makes `whisper-server` print its usage
+  and exit instead of listening, and the run then fails at the health check with
+  nothing pointing at the cause. So `run.cmd` sets `TRANSCRIBER_NO_GPU=1` (passing
+  `-ng` instead) when `vendor\bin\ggml-vulkan.dll` is absent. It keys on that DLL
+  rather than on `whisper-server.exe` because the CPU archive installs the
+  executable too, so the executable would report every CPU install as missing its
+  GPU. It does not override you: an explicit `TRANSCRIBER_NO_GPU`, a
+  `TRANSCRIBER_SERVER_BIN`, or a Vulkan DLL of your own in `vendor\bin\` all
+  suppress it.
+- **A CUDA archive is not a shortcut.** Upstream does publish
+  `whisper-cublas-*-bin-x64.zip`, and it looks like the first-party accelerated
+  option. But there is no way to point VoxPipe's Vulkan-index device selection at
+  a CUDA device, so on that build you would still be on the CPU. It is not offered
+  as a download for that reason.
+
+Both Windows server builds also import `MSVCP140.dll` and `VCRUNTIME140.dll` from
+the Visual C++ Redistributable, and ship neither — so without that redistributable
+`whisper-server.exe` refuses to start, and the only symptom VoxPipe can report is
+a health check that times out naming nothing. Both `install.cmd` and `run.cmd`
+therefore warn if those two DLLs are missing, and both then carry on: a machine
+can have them by another route, and a self-built server shipped with its own
+copies works regardless. `run.cmd` only warns when it can see a server it would
+actually launch. The fix is the x64 redistributable from
+[microsoft.com](https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist).
+
 ## Features
 
 - Word-level and segment-level timestamps from whisper.cpp
@@ -41,12 +107,29 @@ Three interfaces, all sharing one warm `whisper-server` process:
 
 ## Requirements
 
-- Linux, Python ≥ 3.10
-- A Vulkan-capable GPU and driver (verified on GTX 1070 / Pascal with driver
-  580.178.04). Without a GPU it still runs on CPU — just slower.
+- Linux or Windows, Python ≥ 3.12
+- **Linux:** a Vulkan-capable GPU and driver (verified on GTX 1070 / Pascal with
+  driver 580.178.04). Without a GPU it still runs on CPU — just slower.
+- **Windows:** works with no GPU, and it will ask which build you want. With a
+  Vulkan device present the default is a third-party Vulkan build; without one it
+  is the first-party CPU archive. See [Platform support](#platform-support) for
+  where those builds come from and what is not verified about them.
 - Disk for `vendor/` (629 MB): a `whisper-server` binary, the GGML model weights
   and the two ONNX diarization models all ship with the project, so nothing is
-  compiled or downloaded on the first run. See below to rebuild or replace them.
+  compiled or downloaded on the first run — **except** on Windows, where the
+  server binary is fetched separately (it cannot be the Linux one). See below to
+  rebuild or replace any of it.
+
+The 3.12 floor is not about this code. Nothing in `src/voxpipe` uses syntax or
+standard library newer than 3.9, and every module imports
+`__future__.annotations`, so the source would run on much older interpreters —
+it is the pinned dependency set that decides. `numpy 2.5.3` in
+`requirements.lock` declares `requires-python >=3.12`, so a pinned install
+cannot resolve on 3.10 or 3.11 at all; `pip` refuses the wheel rather than
+falling back to a build. `sherpa-onnx 1.13.8` publishes `cp312`–`cp314`
+wheels, so 3.12 to 3.14 is the range that installs from the lock as-is. Both
+installers check this before they touch anything, rather than letting it
+surface partway through as a failed dependency install.
 
 ## Installation
 
@@ -75,30 +158,20 @@ install.cmd
 run.cmd
 ```
 
-Three differences are worth knowing before you start. The `whisper-server` binary
-vendored in this repository is a **Linux ELF build and cannot run on Windows**,
-but unlike the Vulkan case, upstream *does* publish a Windows build, so
-`install.cmd` offers to fetch it: the official `whisper-bin-x64.zip` from the
-`v1.9.2` release, verified against a pinned sha256 before anything is written
-to `vendor/bin/`. That is the one step that puts downloaded code on your
-machine, so it asks first and shows you the URL, hash and size; answering `n`
-skips it and the rest of the install still completes. The `.dll` files are
-unpacked alongside the executable, because ggml loads its backends at run time
-and the server will not start without them. Say `no`, or the archive is
-unavailable, and the script prints the from-source commands instead; note those
-land in `whisper.cpp\build\bin\Release\`, since MSVC is a multi-config
-generator. Whichever route you take, it has to be the **HTTP server**, not the
+The platform differences are tabulated under
+[Platform support](#platform-support); the practical summary is that
+`install.cmd` is the one step in this project that downloads code onto your
+machine, so it asks which build you want and shows you the URL, hash and size
+for the one you pick. Choose the skip option and the rest of the install still
+completes, printing the from-source commands instead. Two details it cannot
+decide for you: the fetched archive is the **HTTP server**, not the
 command-line transcriber — searching for "whisper.cpp Windows" mostly turns up
-`main.exe` and `whisper-cli.exe` builds, which cannot work here because VoxPipe
-starts the server and POSTs audio to it. The downloadable archive is CPU-only,
-so a Windows install without a GPU-accelerated build will be markedly slower
-than the Linux one; there is no prebuilt x64 Vulkan archive, but upstream does
-publish `whisper-cublas-*-bin-x64.zip` for NVIDIA. And the leftover-server
-ownership record identifies a process by its start time read from
-`/proc/<pid>/stat`, which does not exist on Windows; the record is
-still written and reaping still works, but it cannot tell a recycled pid from
-the original process, so that one check is weaker there. The Python side needs
-no special handling — every dependency in the lock ships a Windows wheel.
+`main.exe` and `whisper-cli.exe`, which cannot work here because VoxPipe starts
+the server and POSTs audio to it — and an MSVC build lands in
+`whisper.cpp\build\bin\Release\`, since MSVC is a multi-config generator. If you
+end up with a server that has no Vulkan backend, `run.cmd` sets
+`TRANSCRIBER_NO_GPU=1` for you, which it decides by looking for
+`vendor\bin\ggml-vulkan.dll`.
 
 ```bash
 cd /path/to/VoxPipe               # this repository
@@ -129,6 +202,10 @@ test suite covers the API either way.
 
 ### 1. whisper-server (Vulkan)
 
+> This whole subsection describes the **Linux** route. On Windows the vendored
+> binary is a Linux ELF and cannot run, so `install.cmd` fetches a Windows build
+> instead; see [Platform support](#platform-support).
+
 **A working binary is vendored in `vendor/bin/`** (47 MB, git-ignored, with its
 libraries), so a fresh clone needs no environment variable and no sibling
 checkout. It was patched to be relocatable: whisper.cpp bakes *absolute*
@@ -155,7 +232,9 @@ The app finds the binary in this order: `$TRANSCRIBER_SERVER_BIN`, `$PATH`,
 `vendor/whisper-server`, `vendor/bin/whisper-server`, and `./build/bin`. Every
 candidate after `$PATH` is optional; if all miss, the bare name is kept so the
 error names the expected program. No candidate lives outside the project, so it
-can be moved or cloned anywhere.
+can be moved or cloned anywhere. On Windows each in-project candidate is probed
+as `whisper-server.exe` too, because `shutil.which` resolves `PATHEXT` but a
+plain file check does not.
 
 > The vendored copy uses the **system** `libvulkan.so.1` (1.3.275) rather than
 > the build sysroot's, so the 60 MB sysroot is not needed. Verified: it finds
@@ -749,6 +828,22 @@ copies it next to the weights, and the wheel ships both it and `LICENSE` under
 - The vendored tree is relocatable, but the *upstream* whisper.cpp build is not:
   its shared objects carry absolute `RUNPATH`s until `scripts/vendor-server.sh`
   rewrites them to `$ORIGIN` (see above).
+- **Windows GPU acceleration is available but unverified.** There is no
+  first-party x64 Vulkan archive, so `install.cmd` defaults to one of two
+  third-party, unsigned builds when it detects a Vulkan device, and to the
+  first-party CPU archive otherwise. Their publisher states no whisper.cpp
+  version, so the pin is a hash and a tag rather than a version claim. A server
+  without `ggml-vulkan.dll` needs `TRANSCRIBER_NO_GPU=1` or the server prints its
+  usage and refuses to start; `run.cmd` sets that itself by looking for that DLL.
+  Orphan reaping is also weaker there, since there is no `/proc` to read a start
+  time from. The Python side is unaffected. See
+  [Platform support](#platform-support).
+- **The Windows install path has not been run on real Windows hardware.** Its
+  batch logic is exercised under Wine and the PowerShell extraction with host
+  `pwsh` against the real upstream and Vulkan archives, but Wine cannot run a
+  Windows Python and cannot run the GPU-detection code faithfully, so
+  end-to-end installation, GPU detection and `whisper-server.exe` startup on a
+  real Vulkan device remain unverified.
 
 ## Development
 
@@ -771,12 +866,16 @@ purpose: install without `-c`, run the offline suite **and**
 `tests/test_end_to_end.py` (the only tests that touch the real GPU server), then
 regenerate the lock with `pip freeze`.
 
-The default suite is offline and needs no GPU (150 tests, ~5.7 s; 6 more collect
-and skip unless the e2e variables are set) — including the
-API tests, which drive the FastAPI app through `TestClient` with a stub
-transcriber, so they cover routing, the extension gate, error mapping and temp-file
-cleanup without a GPU. They `importorskip` if the `api` extra is missing, so a
-base-only install still runs the other tests instead of erroring at collection.
+The default suite needs no GPU and passes with the network unplugged (166
+tests, ~17 s; 6 more collect and skip unless the e2e variables are set) —
+including the API tests, which drive the FastAPI app through `TestClient` with a
+stub transcriber, so they cover routing, the extension gate, error mapping and
+temp-file cleanup without a GPU. They `importorskip` if the `api` extra is
+missing, so a base-only install still runs the other tests instead of erroring
+at collection. One test does use the network when it can: it asks PyPI what each
+pin in `requirements.lock` requires, to confirm the declared Python floor is
+still high enough, and skips instead of failing when it cannot.
+
 The end-to-end suite runs the real server and real diarization, and skips
 itself unless pointed at a binary and a recording. Both paths point inside this
 project or anywhere else you like, so the suite runs with no sibling checkout.

@@ -7,7 +7,13 @@ name = "voxpipe"
 version = "1.0.0"
 description = "Audio transcription with speaker diarization on whisper.cpp (Vulkan) + sherpa-onnx, with a CLI, folder workflow and REST API"
 readme = "README.md"
-requires-python = ">=3.10"
+# Set by the lock, not by this code: nothing in src/voxpipe uses syntax or
+# stdlib newer than 3.9, and every module imports __future__.annotations. But
+# numpy 2.5.3 declares requires-python >=3.12, so the pinned install cannot
+# resolve below that. pip confirms it (refuses numpy==2.5.3 for 3.10 and 3.11).
+# sherpa-onnx 1.13.8 publishes cp312-cp314 wheels, so 3.12-3.14 is the range
+# that actually installs from the lock without building from source.
+requires-python = ">=3.12"
 license = "MIT"
 license-files = ["LICENSE", "THIRD-PARTY-NOTICES.md"]
 dependencies = [

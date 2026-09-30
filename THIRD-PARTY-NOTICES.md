@@ -5,9 +5,11 @@ our source code**. The pre-trained model weights it downloads are separate works
 under their own licenses, reproduced below. The Python dependencies keep their
 own licenses; they are not redistributed here.
 
-This file is the authoritative attribution for the models. It is tracked in git
-on purpose: `vendor/` is git-ignored, so notices kept only there would vanish on
-a fresh clone. `scripts/fetch-models.sh` copies this file next to the weights.
+This file is the authoritative attribution for the models, and for the third-party
+server binaries `install.cmd` offers to download on Windows. It is tracked in
+git on purpose: `vendor/` is git-ignored, so notices kept only there would
+vanish on a fresh clone. `scripts/fetch-models.sh` copies this file next to the
+weights.
 
 ## Vendored model weights
 
@@ -60,6 +62,37 @@ ship; PyAV's own wheel metadata lives in
 whisper.cpp itself is a separate build, vendored as a relocatable copy in
 `vendor/bin/` by `scripts/vendor-server.sh`. It is MIT-licensed,
 Copyright (c) 2023 Georgi Gerganov and the whisper.cpp authors.
+
+## Windows server binaries fetched at install time
+
+Nothing in this repository is redistributed here. `install.cmd` offers to
+**download** one of these onto the user's machine, which is why they are listed:
+the choice is made at install time, and a user should be able to see what the
+alternatives are before accepting one. Only the first-party CPU archive is
+offered by default on a machine with no GPU.
+
+| Option | Publisher | What it is | License as published |
+| --- | --- | --- | --- |
+| `whisper-bin-x64.zip` `v1.9.2` | [ggml-org/whisper.cpp](https://github.com/ggml-org/whisper.cpp) | Official release asset, CPU build | MIT (upstream project) |
+| `whisper.cpp-windows-vulkan.zip` `v1.0.0` | [jerryshell/whisper.cpp-windows-vulkan-bin](https://github.com/jerryshell/whisper.cpp-windows-vulkan-bin) | Third-party rebuild, Vulkan | **None stated** |
+| `whisper.cpp-windows-vulkan.zip` `v1.0` | [DomoticX/whisper.cpp-windows-vulkan](https://github.com/DomoticX/whisper.cpp-windows-vulkan) | Third-party rebuild, Vulkan | **None stated** |
+
+The underlying source of all three is whisper.cpp, which is MIT-licensed as
+above. That is a statement about the code they are compiled from, **not** a
+license grant from whoever compiled them: neither third-party repository
+publishes a `LICENSE` file, a `README`, or any SPDX license metadata, and the
+binaries are not code-signed. `install.cmd` shows the sha256 of each archive and
+verifies it before extracting anything, which is what makes the *download*
+verifiable; it cannot make the *publisher* one whose terms we can quote. If that
+is not a trade you want to make, take the CPU option, or build whisper.cpp
+yourself with `-DGGML_VULKAN=ON` and point `TRANSCRIBER_SERVER_BIN` at the
+result.
+
+Neither third-party publisher states which whisper.cpp version was built. The
+binaries share 43-44 of 45 MSVC lambda symbol ids with upstream `v1.9.2`, which
+is consistent with the same or a very nearby source tree but is not proof, so
+the version is recorded nowhere rather than guessed. `install.cmd` therefore pins
+them by tag plus hash, not by a version claim.
 
 ---
 

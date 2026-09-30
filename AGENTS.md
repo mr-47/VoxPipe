@@ -60,14 +60,18 @@ The old app's `format.py` and `merge.py` were adapted (MIT, no copyright holder)
   it names a stable tag (a branch or `master` URL would drift out from under
   its own hash), the hash is checked before extraction rather than after, and
   the download and the from-source fallback in `:no-server` pin the same tag —
-  `test_download_and_the_build_fallback_pin_the_same_tag` exists because those
+  `test_the_cpu_pin_and_the_build_fallback_pin_the_same_tag` exists because those
   are two pieces of text that drift apart silently. Do not relax
   `if not exist "vendor\bin\whisper-server.exe"` into a bare `if errorlevel`
   check: PowerShell exits 0 having done nothing under a blocked execution
   policy or a partial install, and that check is what stops a completed install
-  reporting success with no server. The archive's ten
+  reporting success with no server. The archive's nine
   `ggml-cpu-<microarch>.dll` files must all be unpacked — ggml picks between
-  them at load time, so shipping a subset quietly costs performance. The
+  them at load time, so shipping a subset quietly costs performance. (Nine, not
+  ten: the count was asserted from memory and the pinned archive actually holds
+  nine, alongside `SDL2`, `ggml`, `ggml-base`, `parakeet` and `whisper` for 14
+  `.dll` files in total. Re-check against the archive rather than trusting the
+  number.) The
   `.exe` probe in `_discover_server_bin`
   is needed because `shutil.which` resolves `PATHEXT` but `Path.is_file()` does
   not — without it a vendored `.exe` is invisible and only the bare-name
@@ -97,6 +101,14 @@ The old app's `format.py` and `merge.py` were adapted (MIT, no copyright holder)
 - **Licensing splits two ways.** `LICENSE` covers our code only; pre-trained
   weights are separate works. Never fold model weights into the project license,
   and keep `THIRD-PARTY-NOTICES.md` next to the weights in `vendor/models/`.
+- **`install.cmd` and `run.cmd` are 100% CRLF and must stay that way.** Real
+  `cmd.exe` misparses LF-only batch — most visibly at `goto`/labels, which is
+  exactly what the server-choice menu and the `:no-server` fallback depend on.
+  The `edit` tool has been preserving the endings on these two files, but check
+  after any bulk edit, and note that `scripts/unpack-server.ps1` and `install.sh`
+  are deliberately LF. Count them with Python, not `awk`: `awk 'gsub(/\r/,"")'`
+  reported 1 of 416 lines on a file that is entirely CRLF, which is how a
+  whole-file conversion nearly got mistaken for a clean edit here.
 
 ## Decisions and their reasons
 
@@ -114,6 +126,22 @@ The old app's `format.py` and `merge.py` were adapted (MIT, no copyright holder)
   automatically breakage — but a clean install is not reproducible without the
   lock. If you bump deps on purpose, drop `-c`, then run the offline suite **and**
   `tests/test_end_to_end.py`, and regenerate the lock.
+- **The Python floor is set by the lock, not by the code.** `requires-python` is
+  `>=3.12` because `numpy 2.5.3` in the lock declares it, not because anything in
+  `src/voxpipe` needs it — there is no 3.10+ syntax, no `match`, and every module
+  imports `__future__.annotations`. It sat at `>=3.10` with `install.sh` enforcing
+  `>=3.9` and `install.cmd` checking nothing, which was wrong three ways and
+  invisible: the code ran fine and only the *install* failed, partway through, as
+  pip refusing a wheel. `test_the_floor_is_high_enough_for_the_lock` queries PyPI
+  for every pin's `requires_python` and is the test that would have caught it, so
+  **re-run it after any dependency bump** — a newer numpy can move the floor in
+  either direction. `test_the_declared_floor_and_the_installers_agree` keeps
+  `pyproject.toml`, `install.sh` and `install.cmd` from drifting apart, because
+  that is exactly the failure mode above.
+  Related: `sherpa-onnx 1.13.8` only ships `cp312`–`cp314`, so 3.15 is above the
+  floor but below what the lock can install without compiling. That is a
+  *ceiling*, which `requires-python` cannot express, so it is documented in the
+  README rather than enforced.
 - **Folder names are a breaking change, not a preference.** VoxPipe creates
   `media-*` and never looks at `calls-*`, so files left in an old `calls-inbox`
   are silently ignored. This is documented in the README migration table.
@@ -129,7 +157,8 @@ python3 -m venv .venv
 .venv/bin/ruff check src tests
 .venv/bin/ruff format src tests
 
-# offline suite: ~5.7s, no GPU, no network  -> 150 passed, 6 skipped
+# default suite: ~17s, no GPU  -> 166 passed, 6 skipped
+# (passes with no network: the PyPI lock check skips when it is unreachable)
 .venv/bin/pytest
 
 # e2e: real server + real diarization, needs a binary and a recording
@@ -171,6 +200,112 @@ makes `$Zip` a *type-constrained* variable, and PowerShell names are
 case-insensitive, so a later `$zip = [ZipFile]::OpenRead($Zip)` silently coerces
 the handle back to a string and every entry test fails against an empty
 collection. Name the handle something else.
+- **Windows GPU acceleration is now the default when a device is present — and
+  the signal is `ggml-vulkan.dll`, not `whisper-server.exe`.** `ggml-org`
+  publishes no x64 Vulkan archive for Windows, so `install.cmd` offers two
+  third-party, unsigned rebuilds
+  (`jerryshell/whisper.cpp-windows-vulkan-bin` `v1.0.0` and
+  `DomoticX/whisper.cpp-windows-vulkan` `v1.0`) next to the first-party CPU
+  archive, all three pinned to a tag plus a sha256. The menu **defaults to the
+  Vulkan build when a device is detected and to the CPU build when none is**, and
+  the numbering is fixed across both so only the default moves. Do not
+  "simplify" it back to a yes/no prompt: the whole point is that the fetched
+  build is chosen by what the machine can actually run. Neither publisher states
+  a whisper.cpp version, so the honest pin is the hash plus the lambda-id
+  evidence in the README, not a version claim — do not upgrade one into the
+  other.
+
+  `run.cmd` keys its `TRANSCRIBER_NO_GPU=1` guard on the *absence of
+  `vendor\bin\ggml-vulkan.dll`*. This is the load-bearing detail: the upstream
+  CPU archive installs `whisper-server.exe` into `vendor\bin\` too, so the older
+  executable-presence guard reported every ordinary CPU install as having no
+  accelerated server, and read the other way would have reported a Vulkan
+  install as CPU-only. All three guard conditions are `if not defined`/`if not
+  exist` **on purpose** — an explicit `TRANSCRIBER_NO_GPU`, a
+  `TRANSCRIBER_SERVER_BIN`, or a self-built Vulkan server must all keep the GPU.
+  Do not add a blanket `set TRANSCRIBER_NO_GPU=1`; that would silently cost a
+  user their GPU.
+
+  `core.py` picks the device with whisper.cpp's Vulkan-only `-dev N` flag, and
+  an unrecognized flag makes `whisper-server` print its usage and exit instead of
+  listening — so a CPU server must never receive it, which is what the guard is
+  for. A CUDA archive is published upstream but is **not** a shortcut: there is
+  no way to point a Vulkan device index at a CUDA device, so on that build you
+  are still on the CPU. `test_cuda_is_still_not_offered_as_a_gpu_path` holds
+  that, and the reasoning behind each of the four menu entries is pinned by
+  `test_every_server_pin_is_a_whole_release_url`,
+  `test_the_pinned_hashes_are_well_formed_and_used`,
+  `test_the_vulkan_pins_are_marked_third_party`,
+  `test_run_cmd_only_drops_the_gpu_without_a_vulkan_backend` and
+  `test_install_cmd_defaults_to_the_gpu_build_when_a_device_is_detected`.
+
+- **The unpack glob is `ggml-cpu*.dll`, and the hyphen version is a bug.** The
+  upstream CPU archive ships nine `ggml-cpu-<microarch>.dll` variants; the
+  third-party Vulkan archives ship a single plain `ggml-cpu.dll` and sit at the
+  archive root rather than under `Release/`. A glob of `ggml-cpu-*.dll` matches
+  neither difference, so a Vulkan install extracted with no CPU backend and
+  still reported success. The old `$dllCount -lt 3` check could not catch it
+  either, which is why `-Variant cpu|vulkan` is now a **caller-declared**
+  parameter: nothing inside an archive states which build it is, and the check
+  has to be "these named files are present", not "enough files arrived".
+
+- **The VC++ redistributable warning is in `run.cmd` too, and is never fatal.**
+  Both server builds import `MSVCP140.dll`/`VCRUNTIME140.dll` and ship neither, so
+  without them `whisper-server.exe` prints "The code execution cannot proceed
+  because MSVCP140.dll was not found" — inside a child process, after which the
+  only symptom VoxPipe reports is a health check that times out naming nothing.
+  `install.cmd` warns once at install time; `run.cmd` covers the machine that
+  lost the redistributable afterwards and the self-built server that never went
+  through the installer, and it is **gated on a server actually being launchable**
+  (`vendor\bin\whisper-server.exe`, or whatever `TRANSCRIBER_SERVER_BIN` names) so
+  a machine with no server is not nagged. Warn, never refuse: those DLLs can be
+  present by another route, or shipped beside a self-built server, so a hard
+  failure would be wrong rather than merely cautious.
+  `test_install_cmd_warns_about_the_vc_runtime_without_failing` and
+  `test_run_cmd_warns_about_the_vc_runtime_before_launching` hold both.
+  Related: `run.cmd` must **not** enable delayed expansion, because it forwards
+  `%*` to `voxpipe watch` and `!` in a path or argument would be consumed. That
+  is why the probe is flat `if ... set` lines rather than a nested block needing
+  `!VAR!` — held by `test_run_cmd_does_not_enable_delayed_expansion`.
+
+- **The third-party Vulkan archives are pinned by hash, not by version, and that
+  is deliberate.** Neither publisher states which whisper.cpp was built, and
+  neither repo publishes a `LICENSE`, a `README` or any SPDX metadata. The
+  binaries do share 43-44 of 45 MSVC lambda symbol ids with upstream `v1.9.2`,
+  which is consistent with the same or a nearby tree and is **not** proof. So:
+  do not write "Vulkan build of v1.9.2" anywhere, do not treat the upstream MIT
+  license as covering whoever compiled them, and keep the honest formulation in
+  `THIRD-PARTY-NOTICES.md` — which now lists all three options, including that
+  the two third-party ones carry **no stated license**, so a user can decline
+  before accepting the download rather than after.
+
+- **When verifying batch logic under Wine, three traps, all of which produced
+  false results here.** A `.bat` shim for a program that is really an `.exe`
+  transfers control and never returns, so the caller appears to stop mid-script
+  — invoke it with `call` in the harness. **`for /f` is worse: Wine runs the
+  `do` body even when the command produced no output, and does not substitute
+  `%%G` inside a multi-line parenthesised block at all.** So a
+  `do if not defined GPU ( set ... )` loop over a missing command sets the
+  variable to the literal text `%G` in Wine and reports a GPU on a machine with
+  none. GPU detection is therefore written as single-line
+  `do if not defined X set "X=%%G"`, and even then **the detection is not
+  verifiable under Wine** — it is standard `cmd`/`reg` and the negative path
+  cannot be exercised. Do not "fix" a Wine-only failure here by changing the
+  detection; verify the *consumer* of the result instead (the menu default and
+  the redistributable warning are both testable by extracting the region and
+  feeding stdin). Overriding
+  `%SystemRoot%` from the environment also breaks `wine cmd` itself, so a harness
+  that needs a different one has to set it from inside the batch.
+
+  Two more measurement traps in the same area. Assert on output, and confirm a
+  probe actually contains the text it is meant to exercise: extracting a block
+  with `src[i:src.index(...)]` returned empty because the needle also occurred
+  in an earlier comment — and the same class of bug then bit the *tests*, where
+  "this wrong form must not appear" assertions matched the comments that
+  explain why the form is wrong, and a `sed` mutation with a `$` anchor silently
+  matched nothing on a CRLF file and reported a false survivor. Use
+  `_install_cmd_code()` / `_unpack_ps1_code()` for those, and check that a
+  mutation actually changed the file before believing that a test caught it.
 
 ## Verifying a diarization or merge change
 

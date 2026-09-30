@@ -37,10 +37,12 @@ step "Checking prerequisites"
 for tool in python3 curl tar; do
   command -v "$tool" > /dev/null || die "$tool is required but not installed"
 done
-# 3.8 is the floor pyproject declares; 3.9+ is what the lock was resolved on.
-python3 - <<'PY' || die "python 3.9+ is required"
+# Matches pyproject's requires-python, which is set by numpy 2.5.3 in the lock
+# (>=3.12) rather than by anything in this code. Checking anything lower lets
+# the failure surface much later, as pip refusing a wheel during the install.
+python3 - <<'PY' || die "python 3.12+ is required (numpy 2.5.3 in requirements.lock needs it)"
 import sys
-sys.exit(0 if sys.version_info >= (3, 9) else 1)
+sys.exit(0 if sys.version_info >= (3, 12) else 1)
 PY
 echo "  python3 $(python3 -c 'import platform; print(platform.python_version())')"
 command -v nvidia-smi > /dev/null && nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | sed 's/^/  gpu: /' \

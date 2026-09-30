@@ -1,7 +1,7 @@
 # Pinned dependency versions for this project.
 #
 # Generated from a working install on 2026-09-28 (Linux, CPython 3.12, CUDA-less
-# GTX 1070 / Vulkan) and verified with the full suite: 141 offline tests, 6
+# GTX 1070 / Vulkan) and verified with the full suite: 166 offline tests, 6
 # end-to-end tests against a real whisper-server, and a real two-speaker
 # transcription.
 #
