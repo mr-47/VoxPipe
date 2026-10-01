@@ -292,6 +292,8 @@ See [REST API](docs/api.md) for lifecycle, readiness and server-reuse details.
 
 VoxPipe supports:
 
+**Input formats (via [PyAV](https://github.com/PyAV-Org/PyAV)):** `.aac`, `.flac`, `.m4a`, `.mp3`, `.ogg`, `.opus`, `.wav`, `.webm` and other common container formats that contain an audio stream.
+
 | Format | Use case |
 |---|---|
 | Markdown | Human-readable transcripts |
